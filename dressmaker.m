@@ -1,55 +1,87 @@
 function [NEWout, DRESSout, FIG] = dressmaker(NEW0, Nmask, DRESS, Dmask)
+% PURPOSE -----------------------------------------------------------------
+% Turn new images into ambiguous images similar to #theDress by mapping
+% chromaticities to the main (blue-yellow) hue direction of #theDress. Run
+% without input for illusration.
+% INPUT -------------------------------------------------------------------
+% Default files names point towards images in the same folder as
+% dressmaker.
+% NEW0      = A new image of an object with two colour parts.
+% Nmask     = Mask of the new image that distinguishes object from
+% background; mask = binary indices that corresponds to the pixels of the
+% image. 
+% DRESS     = #theDress, i.e. original photo of dress.
+% Dmask     = Mask that distinguishes the dress from its background. 
+% SETTINGS ----------------------------------------------------------------
+% For simplification, additional settings are specified by the structure
+% SETTINGS within the function. The following settings are implemented:
+% mon_xyY   = Monitor luminance and chromaticities; default: empty = sRGB.
+% mon_ldt   = Inverse look-up tables; default: empty = sRGB.
+% mapdim    = dimensions to be mapped; default [2,3] = u*,v*. 
+% swaphue   = inverts the hue direction; if empty (default), determined
+% automatically based on lightness of the two object parts. 
+% bg = background colour in CIELUV; default: black [0 0 0]; set e,g, [100 0 0]
+% for white background etc.
+% OUTPUT ------------------------------------------------------------------
+% NEWout    = the new image with the colours mapped to the hue direction of
+% #theDress (last panel of figure). NEWout is a struct with the following
+% variables: 
+%   rgb     = RGB image.
+%   threeD  = Luv images with third dimension being L*, u*, and v*
+%   twoD    = list of all different Luv values with columns being L*, u*,
+%   and v*; useful for scatterplot.    
+% DRESSout  = #theDress with colour distribution mapped to the main hue
+% dimension (i.e. principal component). Format as NEWout.
+% FIG       = handle of the figure.
+% GENEALOGY ---------------------------------------------------------------
 % 2019.10.22 * [cw]
+% 2020.03.10 added explanations [cw]
 
 %% SETTINGS
-
 if nargin < 4
-    Dmask = imread('dress_mask.png');
+    load('images.mat');
+    Dmask = DRESS.mask;
     if nargin < 3
-        DRESS = imread('dress.png');
+        DRESS = DRESS.rgb;
         if nargin < 2
-            Nmask = imread('tie_mask.bmp');
+            Nmask = JACKET.mask;
             if nargin < 1
-               NEW0 = imread('tie.jpg');
+               NEW0 = JACKET.rgb;
 clc; close all;
 end; end; end; end
 
-SETTINGS.mon_xyY    = [];
-SETTINGS.mon_ldt    = [];
+fprintf('\n--------- SETTINGS ----------\n\n');
+
+SETTINGS.mon_xyY    = []; % if empty, sRGB
+SETTINGS.mon_ldt    = []; % if empty, sRGB
 SETTINGS.mapdim     = [2,3]; % Default: Only chromatic dimensions (2 and 3)
 SETTINGS.swaphue    = []; % if empty, determined automatically.
-SETTINGS.bg         = [100 0 0]; % 100 0 0 = white
-SETTINGS.plot       = 'all';
-SETTINGS.design     = 'default';
+SETTINGS.bg         = [0 0 0]; % default = black; [100 0 0] = white
 
 DESIGN     = struct(...
-    'addplots',     {{'all'...
-                        }},...
-    'sig_symbols', {{'°', '*', '**', '***'}},... {'', '*', '\bullet', ''};
     'font', 'Arial',...
     'fontsize',  10,...
-    'cn_xtx', 'num',... % or colour name pairs --> allpairs or minmax
     'linewidth', 1,...
     'fatlinewidth', 2,...
-    'markersize', 5,...
-    'vplabels', 'sexed'); % original / sexed
+    'markersize', 5); % original / sexed
 
 %% DEFAULT MONITOR SPECS
 [srgb_xyY, srgb_ldt] = srgb; % To convert original images
 if isempty(SETTINGS.mon_xyY)
     SETTINGS.mon_xyY = srgb_xyY;
     SETTINGS.mon_ldt = srgb_ldt;
-    fprintf('WARNING: Using default sRGB calibration!\n');
+    fprintf('*** INFO: Using default sRGB calibration!***\n');
 end
 
 FIG = [];
 
 %% CONVERT ORIGINAL IMAGES
-wp_XYZ = rgb2XYZ([255 255 255],SETTINGS.mon_xyY, 2);
+wp_XYZ = rgb2XYZ([1 1 1],SETTINGS.mon_xyY, 2);
 NEW0 = double(NEW0);
 DRESS = double(DRESS);
 
 DRESS2 = RGB2Luv(DRESS, wp_XYZ, SETTINGS.mon_xyY, SETTINGS.mon_ldt);
+
 NEW2 = RGB2Luv(NEW0, wp_XYZ, SETTINGS.mon_xyY, SETTINGS.mon_ldt);
 
 % APPLY MASKS -------------------------------------------------------------
@@ -64,11 +96,14 @@ N_Lxy2D = mask_2Dmapper(NEW2, Nmask);
 FIG = [FIG; h];
 
 %% MAPPING
-NEWout.threeD = mask_3Dmapper(NEWout.twoD, Nmask, SETTINGS.bg);
-NEWout.rgb = Luv2RGB(NEWout.threeD, wp_XYZ, SETTINGS.mon_xyY, SETTINGS.mon_ldt);
-
+fprintf('\n----------- CONVERT TO RGB -----------\n\n');
+fprintf('DRESS:\n');
 DRESSout.threeD = mask_3Dmapper(DRESSout.twoD, Dmask, SETTINGS.bg);
 DRESSout.rgb = Luv2RGB(DRESSout.threeD, wp_XYZ, SETTINGS.mon_xyY, SETTINGS.mon_ldt);
+
+fprintf('NEW IMAGE:\n');
+NEWout.threeD = mask_3Dmapper(NEWout.twoD, Nmask, SETTINGS.bg);
+NEWout.rgb = Luv2RGB(NEWout.threeD, wp_XYZ, SETTINGS.mon_xyY, SETTINGS.mon_ldt);
 
 %% ****************************** SUBMODULES ******************************
 
@@ -78,15 +113,15 @@ function [N_mapped2onehue, N_onehue_std, D_onehue, N_onehue, fig_h] = mod_1huema
 
 if nargin < 5
     SETTINGS.mapdim = [2 3];
-    SETTINGS.plot = 'all';
 end
 
 % ONE HUE -----------------------------------------------------------------
+fprintf('\n----------- ONE HUE DIRECTION -----------\n\n');
 [D_onehue, D_pc, D_expl] = hue_aligner(D_Lxy2D(:,SETTINGS.mapdim));
 if numel(SETTINGS.mapdim) == 2
     D_onehue = [D_Lxy2D(:,1), D_onehue];
 end
-fprintf('Explained variance: %.2f%%\n', D_expl(1));
+fprintf('Explained variance #theDress: %.2f%%\n', D_expl(1));
 
 [N_onehue,N_pc,N_expl] = hue_aligner(N_Lxy2D(:,SETTINGS.mapdim));
 if numel(SETTINGS.mapdim) == 2
@@ -94,11 +129,15 @@ if numel(SETTINGS.mapdim) == 2
 end
 
 N_swaphue = N_onehue;
-if SETTINGS.swaphue
+% MATCH CLUSTERS BASED ON LIGHTNESS ---------------------------------------
+if isempty(SETTINGS.swaphue) % swap if lightness relation different.
+    N_swaphue = hue_swapper(D_onehue, N_onehue, SETTINGS.mapdim);
+elseif SETTINGS.swaphue % swap in any case
     N_swaphue(:,SETTINGS.mapdim) = -N_onehue(:,SETTINGS.mapdim);
 end
+
 N_onehue_std = std_mapper(D_onehue, N_swaphue);
-fprintf('Explained variance: %.2f%%\n', N_expl(1));
+fprintf('Explained variance New Image: %.2f%%\n', N_expl(1));
 
 % MAP ON DRESS PC ---------------------------------------------------------
 x = N_swaphue(:,SETTINGS.mapdim(1));
@@ -109,74 +148,71 @@ if numel(SETTINGS.mapdim) == 2
 end
 N_mapped2onehue = std_mapper(D_onehue, N_mapped2onehue);
 
-switch lower(SETTINGS.plot)
-    case {'illu', 'all'}
-        fig_h = figure('Name', 'Algo', 'NumberTitle', 'off');
-        
-        % DRESS -----------------------------------------------------------
-        % ORIGNAL DRESS:
-        subplot(3,3,1)
-        imshow2D(D_Lxy2D, Dmask, SETTINGS.bg);
-        
-        % DRESS DISTRIBUTIONS:
-        subplot(3,3,4)
-        hold on
-        image_scatter(D_Lxy2D, 2, 30)
-        image_scatter(D_onehue, 2, 30)
-        plot(D_onehue(:,2),D_onehue(:,3),'k-', 'LineWidth', 2);
-        plot(0, 0, 'ko', 'MarkerFaceColor', 'w');
-        hold off
-        xlabel('Green-red [u*]');
-        ylabel('Blue-yellow [v*]');
-        title('One Hue Dress', 'FontWeight', 'bold');
-        axis equal;
-        
-        % ONE HUE DRESS:
-        subplot(3,3,7)
-        imshow2D(D_onehue, Dmask, SETTINGS.bg);
-        
-        % NEW -------------------------------------------------------------
-        % ORIGINAL NEW:
-        subplot(3,3,2)
-        imshow2D(N_Lxy2D, Nmask, SETTINGS.bg);
+fig_h = figure('Name', 'Algorithm', 'NumberTitle', 'off');
 
-        % DISTRIBUTION OF NEW IMAGE:
-        subplot(3,3,5)
-        hold on
-        image_scatter(N_Lxy2D, 2, 30)
-        image_scatter(N_onehue, 2, 30)
-        plot(N_onehue(:,2),N_onehue(:,3),'k-', 'LineWidth', 2);
-        plot(0, 0, 'ko', 'MarkerFaceColor', 'w');
-        hold off
-        set(gca, 'FontName', DESIGN.font, 'FontSize', DESIGN.fontsize');
-        xlabel('Green-red [u*]');
-        title('One Hue New', 'FontWeight', 'bold');
-        axis equal;
-        
-        % ONE-HUE NEW:
-        subplot(3,3,8)
-        imshow2D(N_onehue, Nmask, SETTINGS.bg);
+% DRESS -----------------------------------------------------------
+% ORIGNAL DRESS:
+subplot(3,3,1)
+imshow2D(D_Lxy2D, Dmask, SETTINGS.bg);
 
-        % MAPPED NEW ------------------------------------------------------
-        subplot(3,3,3)
-        imshow2D(N_swaphue, Nmask, SETTINGS.bg);
-        
-        % DISTRIBUTION OF MAPPED:
-        subplot(3,3,6)
-        hold on
-        image_scatter(N_swaphue, 2, 30);
-        image_scatter(N_mapped2onehue, 2, 30);
-        plot(N_onehue_std(:,2),N_onehue_std(:,3),'k:', 'LineWidth', 1);
-        plot(0, 0, 'ko', 'MarkerFaceColor', 'w');
-        hold off
-        xlabel('Green-red [u*]');
-        title('One Hue + STD mapped ', 'FontWeight', 'bold');
-        axis equal;
-        
-        % FINAL MAPPED:
-        subplot(3,3,9)
-        imshow2D(N_mapped2onehue, Nmask, SETTINGS.bg);
-end
+% DRESS DISTRIBUTIONS:
+subplot(3,3,4)
+hold on
+image_scatter(D_Lxy2D, 2, DESIGN.markersize*5);
+image_scatter(D_onehue, 2, DESIGN.markersize*5);
+plot(D_onehue(:,2),D_onehue(:,3),'k-', 'LineWidth', DESIGN.fatlinewidth);
+plot(0, 0, 'ko', 'MarkerFaceColor', 'w', 'MarkerSize', DESIGN.markersize);
+hold off
+xlabel('Green-red [u*]');
+ylabel('Blue-yellow [v*]');
+title('One Hue Dress', 'FontWeight', 'bold');
+axis equal;
+
+% ONE HUE DRESS:
+subplot(3,3,7)
+imshow2D(D_onehue, Dmask, SETTINGS.bg);
+
+% NEW -------------------------------------------------------------
+% ORIGINAL NEW:
+subplot(3,3,2)
+imshow2D(N_Lxy2D, Nmask, SETTINGS.bg);
+
+% DISTRIBUTION OF NEW IMAGE:
+subplot(3,3,5)
+hold on
+image_scatter(N_Lxy2D, 2, DESIGN.markersize*5);
+image_scatter(N_onehue, 2, DESIGN.markersize*5);
+plot(N_onehue(:,2),N_onehue(:,3),'k-', 'LineWidth', DESIGN.fatlinewidth);
+plot(0, 0, 'ko', 'MarkerFaceColor', 'w', 'MarkerSize', DESIGN.markersize);
+hold off
+set(gca, 'FontName', DESIGN.font, 'FontSize', DESIGN.fontsize');
+xlabel('Green-red [u*]');
+title('One Hue New', 'FontWeight', 'bold');
+axis equal;
+
+% ONE-HUE NEW:
+subplot(3,3,8)
+imshow2D(N_onehue, Nmask, SETTINGS.bg);
+
+% MAPPED NEW ------------------------------------------------------
+subplot(3,3,3)
+imshow2D(N_swaphue, Nmask, SETTINGS.bg);
+
+% DISTRIBUTION OF MAPPED:
+subplot(3,3,6)
+hold on
+image_scatter(N_swaphue, 2, DESIGN.markersize*5);
+image_scatter(N_mapped2onehue, 2, DESIGN.markersize*5);
+plot(N_onehue_std(:,2),N_onehue_std(:,3),'k:', 'LineWidth', 1, 'LineWidth', DESIGN.fatlinewidth);
+plot(0, 0, 'ko', 'MarkerFaceColor', 'w', 'MarkerSize', DESIGN.markersize);
+hold off
+xlabel('Green-red [u*]');
+title('One Hue + STD mapped ', 'FontWeight', 'bold');
+axis equal;
+
+% FINAL MAPPED:
+subplot(3,3,9)
+imshow2D(N_mapped2onehue, Nmask, SETTINGS.bg);
 
 %% ***************************** SUBFUNCTIONS *****************************
 
@@ -194,7 +230,8 @@ end
 wp_XYZ = rgb2XYZ([1 1 1],mon_xyY, 2);
 
 Lxy2 = unique(Lxy, 'rows');
-rgb = Luv2RGB(Lxy2, wp_XYZ, mon_xyY, mon_ldt, dim);
+warn_message = 0;
+rgb = Luv2RGB(Lxy2, wp_XYZ, mon_xyY, mon_ldt, dim, warn_message);
 
 if edge
     scatter(Lxy2(:,2), Lxy2(:,3), msz, 'ko');
@@ -210,7 +247,8 @@ if nargin < 4
 end
 
 Lxy3D = mask_3Dmapper(Lxy2D, mask, bg);
-RGB = Luv2RGB(Lxy3D, wp_XYZ, mon_xyY, mon_ldt,3);
+warn_message = 0; % Don't show warning
+RGB = Luv2RGB(Lxy3D, wp_XYZ, mon_xyY, mon_ldt,3, warn_message);
 imshow(RGB/255);
 
 %% std_mapper
@@ -228,19 +266,24 @@ for k = 1:3
 end
 
 %% gammacorrector
-function RGBg = gammacorrector(RGBl, LDT, dim)
+function RGBg = gammacorrector(RGBl, LDT, dim, warn_message)
 % 2012aug30 [cw]
 
-if nargin < 3
-    dim = 3;
+if nargin < 4
+    warn_message = 1;
+    if nargin < 3
+        dim = 3;
+    end
 end
 
 out1 = sum(sum(sum(RGBl>LDT(end,1)+0.5,3),2),1); % usually 255
 out2 = sum(sum(sum(RGBl<-0.5,3),2),1); % usually 255
 out = out1+out2;
-n = size(RGBl>LDT(end,1),3) * size(RGBl>LDT(end,1),2) * size(RGBl>LDT(end,1),1); 
-if out > 0
-    fprintf('WARNING: %d / %.0f%% are out of gamut, %d / %.0f%% >max and %d / %.0f%%\n', out, out/n*100, out1, out1/n*100, out2, out2/n*100);
+n = size(RGBl,3) * size(RGBl,2) * size(RGBl,1); 
+if warn_message
+    if out > 0
+        fprintf('WARNING: %d / %.0f%% are out of gamut, %d / %.0f%% >max and %d / %.0f%%\n', out, out/n*100, out1, out1/n*100, out2, out2/n*100);
+    end
 end
 
 if dim == 2
@@ -312,78 +355,7 @@ function RGBg1 = gammacorrector_subfunction2(RGBl1, LDT1)
 y1 = (1:numel(LDT1))'-1;
 RGBg1 = round(interp1(LDT1, y1, RGBl1, 'linear', 'extrap'));
 
-%% gammacorrection
-function [R_corrected, G_corrected, B_corrected] = gammacorrection(R, G, B, LUT, LUT2, LUT3)
-% 2009 [cw].
-
-% COPE WITH INPUT VARIATIONS
-if nargin == 4 && iscell(LUT)
-    redlut      = LUT{1};
-    greenlut    = LUT{2};
-    bluelut     = LUT{3};
-elseif nargin > 4 && isnumeric(LUT)
-    if min(size(LUT)) == 1
-        redlut      = LUT;
-        greenlut    = LUT2;
-        bluelut     = LUT3;
-    elseif min(size(LUT)) == 2
-        redlut      = LUT(:,2);
-        greenlut    = LUT2(:,2);
-        bluelut     = LUT3(:,2);
-    else
-        error('Please reconsider the format of your LUTs!');
-    end
-else    
-    error('Your input Look-Up-Tables (LUT) are in the wrong format! Please check help of function!');
-end;
-
-% GAMMA CORRECTION = LOOK UP
-% R
-sz = size(R);
-inds = ~isnan(R);
-inds_nan = isnan(R);
-R_corrected = redlut(R(inds) + 1);
-R_corrected(inds_nan) = NaN;
-R_corrected = reshape(R_corrected, sz(1), sz(2));
-% G
-sz = size(G);
-inds = ~isnan(G);
-inds_nan = isnan(G);
-G_corrected = greenlut(G(inds) + 1);
-G_corrected(inds_nan) = NaN;
-G_corrected = reshape(G_corrected, sz(1), sz(2));
-% B
-sz = size(B);
-inds = ~isnan(B);
-inds_nan = isnan(B);
-B_corrected = bluelut(B(inds) + 1);
-B_corrected(inds_nan) = NaN;
-B_corrected = reshape(B_corrected, sz(1), sz(2));
-
-% WARNINGS IF VALUES OUT OF GAMMUT (necessary? 2009feb)
-inds = find(R_corrected > 255);
-R_corrected(inds) = 255;
-inds2 = find(R_corrected < 0);
-R_corrected(inds2) = 0;
-if ~isempty(inds)| ~isempty(inds2)
-    disp('overflows truncated to the range [0 255]')
-end
-inds = find(G_corrected > 255);
-G_corrected(inds) = 255;
-inds2 = find(G_corrected < 0);
-G_corrected(inds2) = 0;
-if ~isempty(inds)| ~isempty(inds2)
-    disp('overflows truncated to the range [0 255]')
-end
-inds = find(B_corrected > 255);
-B_corrected(inds) = 255;
-inds2 = find(B_corrected < 0);
-B_corrected(inds2) = 0;
-if ~isempty(inds)| ~isempty(inds2)
-    disp('overflows truncated to the range [0 255]')
-end
-
-%% gamut_checker
+%% gamutchecker
 function [rgbl2, inds0, inds255] = gamutchecker(rgbl1, mon_oog, rgb_max, dim, wrng_detail)
 %2014oct09 [cw]
 
@@ -503,26 +475,54 @@ for k = 1:size(one_line0,2)
     one_line(:,k)= one_line0(:,k)+M(k);
 end
 
-%% Luv2RGB
-function RGBg = Luv2RGB(Luv, wp_XYZ, mon_xyY, mon_ldt, dim)
-% 2019.10.23 * [cw]
-if nargin < 5
-    dim = 3;
+%% hue_swapper
+function New_vec2 = hue_swapper(Dress_vec, New_vec, mapdim)
+% 2020.03.10 [cw]
+
+D_idx = kmeans(Dress_vec(:,mapdim),2);
+N_idx = kmeans(New_vec(:,mapdim),2);
+D_M(1) = mean(Dress_vec(D_idx==1,1));
+D_M(2) = mean(Dress_vec(D_idx==2,1));
+N_M(1) = mean(New_vec(N_idx==1,1));
+N_M(2) = mean(New_vec(N_idx==2,1));
+N_dff = diff(N_M);
+D_dff = diff(D_M);
+
+rD = corr(Dress_vec(:,1),Dress_vec(:,3));
+rN = corr(New_vec(:,1),New_vec(:,3));
+New_vec2 = New_vec;
+%if N_dff*D_dff < 0 % SWAP
+if rD*rN < 0 % SWAP
+     New_vec2(:,mapdim) = -New_vec(:,mapdim);
+    fprintf('\n*** INFO: Hue directions have been automatically swapped.***\n\n');
 end
+
+%% Luv2RGB
+function RGBg = Luv2RGB(Luv, wp_XYZ, mon_xyY, mon_ldt, dim, warn_message)
+% 2019.10.23 * [cw]
+
+if nargin < 6
+    warn_message = 1;
+    if nargin < 5
+        dim = 3;
+    end
+end
+
 [~, XYZ] = Luv2xyY(Luv, wp_XYZ, 'XYZ', dim);
 if dim == 2
     [RGBl(:,1),RGBl(:,2),RGBl(:,3)] = XYZ2rgb(XYZ(:,1), XYZ(:,2), XYZ(:,3), mon_xyY);
 else
     [RGBl(:,:,1),RGBl(:,:,2),RGBl(:,:,3)] = XYZ2rgb(XYZ(:,:,1), XYZ(:,:,2), XYZ(:,:,3), mon_xyY);
 end
-[RGBg] = gammacorrector(RGBl, mon_ldt, dim);
+[RGBg] = gammacorrector(RGBl, mon_ldt, dim, warn_message);
 
 %% RGB2Luv
 function Luv = RGB2Luv(RGBg, wp_XYZ, mon_xyY, mon_ldt)
 % 2019.10.23 * [cw]
 dim = 3;
-[RGBl] = gammainvcorrector(RGBg, mon_ldt, dim, 255);
-XYZ = rgb2XYZ(RGBl, mon_xyY, 3);
+rgb_max = max(mon_ldt(:));
+[RGBl] = gammainvcorrector(RGBg, mon_ldt, dim, rgb_max);
+XYZ = rgb2XYZ(RGBl/rgb_max, mon_xyY, 3);
 Luv = XYZ2Luv(XYZ, wp_XYZ, dim);
 
 %% rgb2XYZ
@@ -724,19 +724,14 @@ end
 if nargin == 2 % Vector mode
     XYZ = X_or_XYZ;
     xyYmon = Y_or_xyYmon;
-    %the coordinates have to be translated to tristimulus values
+    %convert chromaticity coordinates to tristimulus values
     [XYZmon] = xyY2XYZ(xyYmon);
-%    rgb = ((inv(XYZmon')*XYZ')*rgbmax)';
     rgb = ((XYZmon'\XYZ')*rgbmax)';
-    %warning in case values are outside the gamut
-     if  ~isempty(find(rgb < 0)) || ~isempty(find(rgb > rgbmax))  
-        warning('xyY values outside display gamut')
-     end
      R_or_RGB = rgb; % The output R_or_RGB contains the RGB-values.
 elseif nargin >= 4 % Matrices mode
     X = X_or_XYZ; % Input X_or_XYZ contains the matrix with the X values. 
     Y = Y_or_xyYmon; % Input Y_or_xyYmon contains the matrix with the Y values.
-    %the coordinates have to be translated to tristimulus values
+    % convert chromaticity coordinates to tristimulus values:
     [XYZmon] = xyY2XYZ(xyYmon); 
     
     s_r = size(X,1);
@@ -753,11 +748,6 @@ elseif nargin >= 4 % Matrices mode
     B_v = RGB(:,3);
     B = reshape(B_v, s_r,s_c);
     R_or_RGB = R; % The output R_or_RGB contains the matrix with R-values.
-
-    %warning in case values are outside the gamut
-    if  any((any(R<0)|any(R>rgbmax) | any(G<0)|any(G>rgbmax) | any(B<0)| any(B>rgbmax)))
-%        warning('xyY values outside display gamut')
-    end
 else
     error('Check number of input & output!')
 end
